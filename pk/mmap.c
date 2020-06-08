@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <errno.h>
 
+
 typedef struct {
   uintptr_t addr;
   size_t length;
@@ -231,14 +232,25 @@ uintptr_t __do_mmap(uintptr_t addr, size_t length, int prot, int flags, file_t* 
   if (flags & MAP_FIXED)
   {
     if ((addr & (RISCV_PGSIZE-1)) || !__valid_user_range(addr, length))
-      return (uintptr_t)-1;
+      {
+	printk("%d\n", (addr & (RISCV_PGSIZE-1)));
+	printk("%d\n", (!__valid_user_range(addr, length)));
+	printk("kenny __do_mmap error: page not aligned.\n");
+	return (uintptr_t)-1;
+      }
   }
   else if ((addr = __vm_alloc(npage)) == 0)
-    return (uintptr_t)-1;
+    {
+      printk("kenny __do_mmap error: page allocation failed.\n");
+      return (uintptr_t)-1;
+    }
 
   vmr_t* v = __vmr_alloc(addr, length, f, offset, npage, prot);
   if (!v)
-    return (uintptr_t)-1;
+    {
+      printk("__do_mmap error 3\n");
+      return (uintptr_t)-1;
+    }
 
   for (uintptr_t a = addr; a < addr + length; a += RISCV_PGSIZE)
   {
@@ -395,7 +407,10 @@ uintptr_t pk_vm_init()
   // HTIF address signedness and va2pa macro both cap memory size to 2 GiB
   mem_size = MIN(mem_size, 1U << 31);
   size_t mem_pages = mem_size >> RISCV_PGSHIFT;
-  free_pages = MAX(8, mem_pages >> (RISCV_PGLEVEL_BITS-1));
+  //free_pages = MAX(8, mem_pages >> (RISCV_PGLEVEL_BITS-1));
+
+  //kenny increase page size from 8 to 2048
+  free_pages = MAX(2048, mem_pages >> (RISCV_PGLEVEL_BITS-1));
 
   extern char _end;
   first_free_page = ROUNDUP((uintptr_t)&_end, RISCV_PGSIZE);
@@ -407,10 +422,41 @@ uintptr_t pk_vm_init()
   current.mmap_max = current.brk_max =
     MIN(DRAM_BASE, mem_size - (first_free_paddr - DRAM_BASE));
 
-  size_t stack_size = MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE;
-  size_t stack_bottom = __do_mmap(current.mmap_max - stack_size, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0);
+  //original implementation of pk
+  //size_t stack_size = MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE;
+  //size_t stack_bottom = __do_mmap(current.mmap_max - stack_size, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0);
+
+    //kenny try to reduce the stack by half and move the stack_top to halfway in order to preserve space for shadow memory used by sbdl/sbdu instructions.
+  size_t stack_size = (MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE);
+  //printk("kenny stack_size: %lx\n", stack_size);
+  size_t stack_size_x3 = (MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE)*3;
+  //printk("kenny stack_size_x3: %lx\n", stack_size_x3);
+  //size_t stack_bottom = __do_mmap(current.mmap_max - stack_size_x3, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0);
+
+  size_t stack_bottom = __do_mmap((current.mmap_max/3) - stack_size - 2730, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0); // -2730 is manually page aligned need FIXME
   kassert(stack_bottom != (uintptr_t)-1);
-  current.stack_top = stack_bottom + stack_size;
+  current.stack_top = stack_bottom + (size_t)stack_size; //move stack top the third of the stack
+
+  size_t shadow_space = __do_mmap(current.stack_top, current.mmap_max - current.stack_top, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0); // -2730 is manually page aligned need FIXME
+  
+  /*** kenny kindly support beautiful graphic to explain what the hack are we doing.
+
+Original:
+      |======| <- current.mmap_max = current.stack_top
+      |      |
+      |      | STACK
+      |      |
+      |======| <- current.mmap_max - stack_size = stack_bottom
+
+New:
+      |======| <- current.mmap_max
+      |      | SHADOW MEMORY
+      |      | <- stack_bottom + stack_size = current.stack_top
+      |      | STACK
+      |======| <- current.mmap_max - stack_size_x3 = stack_bottom
+
+   ***/
+  
 
   flush_tlb();
   write_csr(sptbr, ((uintptr_t)root_page_table >> RISCV_PGSHIFT) | SATP_MODE_CHOICE);
