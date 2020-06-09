@@ -233,8 +233,8 @@ uintptr_t __do_mmap(uintptr_t addr, size_t length, int prot, int flags, file_t* 
   {
     if ((addr & (RISCV_PGSIZE-1)) || !__valid_user_range(addr, length))
       {
-	printk("%d\n", (addr & (RISCV_PGSIZE-1)));
-	printk("%d\n", (!__valid_user_range(addr, length)));
+	printk("page aligned: %d\n", (addr & (RISCV_PGSIZE-1)));
+	printk("valid user range: %d\n", (!__valid_user_range(addr, length)));
 	printk("kenny __do_mmap error: page not aligned.\n");
 	return (uintptr_t)-1;
       }
@@ -426,18 +426,19 @@ uintptr_t pk_vm_init()
   //size_t stack_size = MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE;
   //size_t stack_bottom = __do_mmap(current.mmap_max - stack_size, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0);
 
-    //kenny try to reduce the stack by half and move the stack_top to halfway in order to preserve space for shadow memory used by sbdl/sbdu instructions.
+    //kenny reduce the stack by half and move the stack_top to 1/3 in order to preserve space for shadow memory used by sbdl/sbdu instructions.
   size_t stack_size = (MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE);
   //printk("kenny stack_size: %lx\n", stack_size);
-  size_t stack_size_x3 = (MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE)*3;
+  //size_t stack_size_x3 = (MIN(mem_pages >> 5, 2048) * RISCV_PGSIZE)*3;
   //printk("kenny stack_size_x3: %lx\n", stack_size_x3);
   //size_t stack_bottom = __do_mmap(current.mmap_max - stack_size_x3, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0);
+  //size_t stack_bottom = __do_mmap((current.mmap_max/3) - stack_size -2730, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0); // -2730 is manually page align FIXME
+  size_t stack_bottom = __do_mmap((current.mmap_max/3) - stack_size - ((current.mmap_max/3 - stack_size) & (RISCV_PGSIZE-1)), stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0); // (addr & (RISCV_PGSIZE-1)) is calculation for  page aligned 
 
-  size_t stack_bottom = __do_mmap((current.mmap_max/3) - stack_size - 2730, stack_size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0); // -2730 is manually page aligned need FIXME
-  kassert(stack_bottom != (uintptr_t)-1);
+  kassert(stack_bottom != (uintptr_t)-1); //checking page alignment
   current.stack_top = stack_bottom + (size_t)stack_size; //move stack top the third of the stack
 
-  size_t shadow_space = __do_mmap(current.stack_top, current.mmap_max - current.stack_top, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0); // -2730 is manually page aligned need FIXME
+  size_t shadow_space = __do_mmap(current.stack_top, current.mmap_max - current.stack_top, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0); // (addr & (RISCV_PGSIZE-1)) is calculation for  page aligned 
   
   /*** kenny kindly support beautiful graphic to explain what the hack are we doing.
 
