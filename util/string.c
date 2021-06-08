@@ -23,6 +23,8 @@ void* memcpy(void* dest, const void* src, size_t len)
   return dest;
 }
 
+#pragma GCC push_options
+#pragma GCC optimize ("no-tree-loop-distribute-patterns")
 void* memset(void* dest, int byte, size_t len)
 {
   if ((((uintptr_t)dest | len) & (sizeof(uintptr_t)-1)) == 0) {
@@ -41,6 +43,7 @@ void* memset(void* dest, int byte, size_t len)
   }
   return dest;
 }
+#pragma GCC pop_options
 
 size_t strlen(const char *s)
 {
